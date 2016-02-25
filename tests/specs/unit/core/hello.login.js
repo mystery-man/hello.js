@@ -29,7 +29,7 @@ define([
 					version: 2
 				},
 				scope: {
-					common_scope: 'common_scope'
+					another_scope: 'another_scope'
 				}
 			};
 
@@ -91,7 +91,7 @@ define([
 			hello.login('testable');
 		});
 
-		it('should by default, include the basic scope defined by the module', function(done) {
+		it('should include the basic scope defined by the module, by default', function(done) {
 
 			var spy = sinon.spy(function(url, name, optins) {
 
@@ -103,6 +103,22 @@ define([
 			utils.popup = spy;
 
 			hello.login('testable');
+		});
+
+		it('should not use "basic" as the default scope, if there is no mapping', function(done) {
+
+			// Remove the basic scope
+			delete hello.services.testable.scope.basic;
+
+			// Now the response should not include the scope...
+			var spy = sinon.spy(function(url) {
+				expect(url).to.not.contain('scope=basic');
+				done();
+			});
+
+			utils.popup = spy;
+
+			hello('testable').login();
 		});
 
 		describe('options', function() {
@@ -160,9 +176,12 @@ define([
 				hello.login('testable', {scope: customScope});
 			});
 
-			it('should discard common scope, aka scopes undefined by this module but defined by other services', function(done) {
+			it('should discard common scope, aka scopes undefined by this module but defined as a global standard in the libary', function(done) {
 
 				var commonScope = 'common_scope';
+
+				// Set this as a common scope (always set to '')
+				hello.settings.scope_map[commonScope] = '';
 
 				var spy = sinon.spy(function(url, name, optins) {
 
@@ -384,6 +403,29 @@ define([
 				hello.login('testable', options);
 			});
 		});
+
+		describe('global events', function() {
+
+			it('should trigger an auth.init event before requesting the auth flow', function(done) {
+
+				// Listen out for the auth-flow
+				hello.on('auth.init', function(e) {
+					expect(e).to.have.property('network', 'testable');
+					expect(spy.notCalled).to.be.ok();
+					done();
+				});
+
+				// Go no further
+				var spy = sinon.spy();
+				utils.popup = spy;
+
+				// Login
+				hello('testable').login({force: true});
+
+			});
+
+		});
+
 	});
 
 });

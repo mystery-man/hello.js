@@ -20,8 +20,8 @@
 				share: 'user_posts',
 				birthday: 'user_birthday',
 				events: 'user_events',
-				photos: 'user_photos,user_videos',
-				videos: 'user_photos,user_videos',
+				photos: 'user_photos',
+				videos: 'user_videos',
 				friends: 'user_friends',
 				files: 'user_photos,user_videos',
 				publish_files: 'user_photos,user_videos,publish_actions',
@@ -172,6 +172,13 @@
 
 		if (o && 'data' in o) {
 			var token = req.query.access_token;
+
+			if (!(o.data instanceof Array)) {
+				var data = o.data;
+				delete o.data;
+				o.data = [data];
+			}
+
 			o.data.forEach(function(d) {
 
 				if (d.picture) {

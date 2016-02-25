@@ -62,6 +62,29 @@ hello.utils.extend(hello, {
 			height: 550
 		},
 
+		// Default scope
+		// Many services require atleast a profile scope,
+		// HelloJS automatially includes the value of provider.scope_map.basic
+		// If that's not required it can be removed via hello.settings.scope.length = 0;
+		scope: ['basic'],
+
+		// Scope Maps
+		// This is the default module scope, these are the defaults which each service is mapped too.
+		// This list is only the popular ones being standardized.
+		// By including them here it prevents the scopes from being applied accidentally
+		// For less common scopes its assumed the Developer knows when to use the scope.
+		scope_map: {
+			basic: '',
+			email: '',
+			files: '',
+			friends: '',
+			photos: '',
+			publish: '',
+			publish_files: '',
+			share: '',
+			videos: ''
+		},
+
 		// Default service / network
 		default_service: null,
 
@@ -127,14 +150,6 @@ hello.utils.extend(hello, {
 		// Merge services if there already exists some
 		utils.extend(this.services, services);
 
-		// Format the incoming
-		for (x in this.services) {
-			if (this.services.hasOwnProperty(x)) {
-				this.services[x].scope = this.services[x].scope || {};
-			}
-		}
-
-		//
 		// Update the default settings with this one.
 		if (options) {
 			utils.extend(this.settings, options);
@@ -247,7 +262,6 @@ hello.utils.extend(hello, {
 			response_type: encodeURIComponent(responseType),
 			redirect_uri: encodeURIComponent(redirectUri),
 			display: opts.display,
-			scope: 'basic',
 			state: {
 				client_id: provider.id,
 				network: p.network,
@@ -265,18 +279,27 @@ hello.utils.extend(hello, {
 		// Ensure this is a string - IE has a problem moving Arrays between windows
 		// Append the setup scope
 		var SCOPE_SPLIT = /[,\s]+/;
-		var scope = (opts.scope || '').toString() + ',' + p.qs.scope;
+
+		// Include default scope settings (cloned).
+		var scope = _this.settings.scope ? [_this.settings.scope.toString()] : [];
+
+		// Extend the providers scope list with the default
+		var scopeMap = utils.merge(_this.settings.scope_map, provider.scope || {});
+
+		// Add user defined scopes...
+		if (opts.scope) {
+			scope.push(opts.scope.toString());
+		}
 
 		// Append scopes from a previous session.
 		// This helps keep app credentials constant,
 		// Avoiding having to keep tabs on what scopes are authorized
 		if (session && 'scope' in session && session.scope instanceof String) {
-			scope += ',' + session.scope;
+			scope.push(session.scope);
 		}
 
-		// Convert scope to an Array
-		// - easier to manipulate
-		scope = scope.split(SCOPE_SPLIT);
+		// Join and Split again
+		scope = scope.join(',').split(SCOPE_SPLIT);
 
 		// Format remove duplicates and empty values
 		scope = utils.unique(scope).filter(filterEmpty);
@@ -287,23 +310,7 @@ hello.utils.extend(hello, {
 		// Map scopes to the providers naming convention
 		scope = scope.map(function(item) {
 			// Does this have a mapping?
-			if (item in provider.scope) {
-				return provider.scope[item];
-			}
-			else {
-				// Loop through all services and determine whether the scope is generic
-				for (var x in _this.services) {
-					var serviceScopes = _this.services[x].scope;
-					if (serviceScopes && item in serviceScopes) {
-						// Found an instance of this scope, so lets not assume its special
-						return '';
-					}
-				}
-
-				// This is a unique scope to this service so lets in it.
-				return item;
-			}
-
+			return (item in scopeMap) ? scopeMap[item] : item;
 		});
 
 		// Stringify and Arrayify so that double mapped scopes are given the chance to be formatted
@@ -386,6 +393,9 @@ hello.utils.extend(hello, {
 		else {
 			url = utils.qs(provider.oauth.auth, p.qs, encodeFunction);
 		}
+
+		// Broadcast this event as an auth:init
+		emit('auth.init', p);
 
 		// Execute
 		// Trigger how we want self displayed
@@ -470,7 +480,7 @@ hello.utils.extend(hello, {
 			var callback = function(opts) {
 
 				// Remove from the store
-				utils.store(p.name, '');
+				utils.store(p.name, null);
 
 				// Emit events by default
 				promise.fulfill(hello.utils.merge({network:p.name}, opts || {}));
@@ -554,7 +564,7 @@ hello.utils.extend(hello.utils, {
 			// Override the items in the URL which already exist
 			for (var x in params) {
 				var str = '([\\?\\&])' + x + '=[^\\&]*';
-				reg = new RegExp(str);
+				var reg = new RegExp(str);
 				if (url.match(reg)) {
 					url = url.replace(reg, '$1' + x + '=' + formatFunction(params[x]));
 					delete params[x];
@@ -845,7 +855,7 @@ hello.utils.extend(hello.utils, {
 		else {
 			var a = document.createElement('a');
 			a.href = path;
-			return a;
+			return a.cloneNode(false);
 		}
 	},
 
@@ -1249,102 +1259,6 @@ hello.utils.extend(hello.utils, {
 			optionsArray.push(name + (value !== null ? '=' + value : ''));
 		});
 
-		// Create a function for reopening the popup, and assigning events to the new popup object
-		// This is a fix whereby triggering the
-		var open = function(url) {
-
-			// Trigger callback
-			var popup = window.open(
-				url,
-				'_blank',
-				optionsArray.join(',')
-			);
-
-			// PhoneGap support
-			// Add an event listener to listen to the change in the popup windows URL
-			// This must appear before popup.focus();
-			try {
-				if (popup && popup.addEventListener) {
-
-					// Get the origin of the redirect URI
-
-					var a = hello.utils.url(redirectUri);
-					var redirectUriOrigin = a.origin || (a.protocol + '//' + a.hostname);
-
-					// Listen to changes in the InAppBrowser window
-
-					popup.addEventListener('loadstart', function(e) {
-
-						var url = e.url;
-
-						// Is this the path, as given by the redirectUri?
-						// Check the new URL agains the redirectUriOrigin.
-						// According to #63 a user could click 'cancel' in some dialog boxes ....
-						// The popup redirects to another page with the same origin, yet we still wish it to close.
-
-						if (url.indexOf(redirectUriOrigin) !== 0) {
-							return;
-						}
-
-						// Split appart the URL
-						var a = hello.utils.url(url);
-
-						// We dont have window operations on the popup so lets create some
-						// The location can be augmented in to a location object like so...
-
-						var _popup = {
-							location: {
-								// Change the location of the popup
-								assign: function(location) {
-
-									// Unfourtunatly an app is may not change the location of a InAppBrowser window.
-									// So to shim this, just open a new one.
-
-									popup.addEventListener('exit', function() {
-
-										// For some reason its failing to close the window if a new window opens too soon.
-
-										setTimeout(function() {
-											open(location);
-										}, 1000);
-									});
-								},
-
-								search: a.search,
-								hash: a.hash,
-								href: a.href
-							},
-							close: function() {
-								if (popup.close) {
-									popup.close();
-								}
-							}
-						};
-
-						// Then this URL contains information which HelloJS must process
-						// URL string
-						// Window - any action such as window relocation goes here
-						// Opener - the parent window which opened this, aka this script
-
-						hello.utils.responseHandler(_popup, window);
-
-						// Always close the popup regardless of whether the hello.utils.responseHandler detects a state parameter or not in the querystring.
-						// Such situations might arise such as those in #63
-
-						_popup.close();
-
-					});
-				}
-			}
-			catch (e) {}
-
-			if (popup && popup.focus) {
-				popup.focus();
-			}
-
-			return popup;
-		};
-
 		// Call the open() function with the initial path
 		//
 		// OAuth redirect, fixes URI fragments from being lost in Safari
@@ -1358,7 +1272,17 @@ hello.utils.extend(hello.utils, {
 			url = redirectUri + '#oauth_redirect=' + encodeURIComponent(encodeURIComponent(url));
 		}
 
-		return open(url);
+		var popup = window.open(
+			url,
+			'_blank',
+			optionsArray.join(',')
+		);
+
+		if (popup && popup.focus) {
+			popup.focus();
+		}
+
+		return popup;
 	},
 
 	// OAuth and API response handler
@@ -1507,35 +1431,32 @@ hello.utils.extend(hello.utils, {
 
 		function closeWindow() {
 
-			// Close this current window
-			try {
-				window.close();
+			if (window.frameElement) {
+				// Inside an iframe, remove from parent
+				parent.document.body.removeChild(window.frameElement);
 			}
-			catch (e) {}
-
-			// IOS bug wont let us close a popup if still loading
-			if (window.addEventListener) {
-				window.addEventListener('load', function() {
+			else {
+				// Close this current window
+				try {
 					window.close();
-				});
+				}
+				catch (e) {}
+
+				// IOS bug wont let us close a popup if still loading
+				if (window.addEventListener) {
+					window.addEventListener('load', function() {
+						window.close();
+					});
+				}
 			}
+
 		}
 	}
 });
 
 // Events
-
 // Extend the hello object with its own event instance
 hello.utils.Event.call(hello);
-
-/////////////////////////////////////
-//
-// Save any access token that is in the current page URL
-// Handle any response solicited through iframe hash tag following an API request
-//
-/////////////////////////////////////
-
-hello.utils.responseHandler(window, window.opener || window.parent);
 
 ///////////////////////////////////
 // Monitoring session state
@@ -2319,7 +2240,7 @@ hello.utils.extend(hello.utils, {
 		// This action will be ignored if we've already called the callback handler "cb" with a successful onload event
 		if (window.navigator.userAgent.toLowerCase().indexOf('opera') > -1) {
 			operaFix = _this.append('script', {
-				text: 'document.getElementById(\'' + callbackId + '\').onerror();'
+				text: 'document.getElementById(\'' + callbackID + '\').onerror();'
 			});
 			script.async = false;
 		}
@@ -2711,3 +2632,12 @@ hello.utils.extend(hello.utils, {
 	};
 
 })(hello);
+
+/////////////////////////////////////
+//
+// Save any access token that is in the current page URL
+// Handle any response solicited through iframe hash tag following an API request
+//
+/////////////////////////////////////
+
+hello.utils.responseHandler(window, window.opener || window.parent);

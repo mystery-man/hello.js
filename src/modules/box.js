@@ -11,10 +11,6 @@ hello.init({
 			response_type: 'code'
 		},
 
-		scope: {
-			basic: ''
-		},
-
 		base: 'https://api.box.com/2.0/',
 
 		get: {
